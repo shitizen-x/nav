@@ -69,7 +69,7 @@ httpInstance.interceptors.request.use(
   function (error) {
     stopLoad()
     return Promise.reject(error)
-  }
+  },
 )
 
 httpInstance.interceptors.response.use(
@@ -91,7 +91,7 @@ httpInstance.interceptors.response.use(
     })
     stopLoad()
     return Promise.reject(error)
-  }
+  },
 )
 
 export const HTTP_BASE_URL = 'https://api.nav3.cn'
@@ -103,6 +103,7 @@ const httpNavInstance = axios.create({
 
 export function getDefaultRequestData(data?: any) {
   const code = getAuthCode()
+  const { email, language } = settings()
   return {
     code,
     hostname: location.hostname,
@@ -111,8 +112,8 @@ export function getDefaultRequestData(data?: any) {
     isLogin,
     ...config,
     ...data,
-    email: settings.email,
-    language: settings.language,
+    email,
+    language,
   } as const
 }
 
@@ -132,7 +133,7 @@ httpNavInstance.interceptors.request.use(
   function (error) {
     stopLoad()
     return Promise.reject(error)
-  }
+  },
 )
 
 httpNavInstance.interceptors.response.use(
@@ -168,7 +169,7 @@ httpNavInstance.interceptors.response.use(
 
     stopLoad()
     return Promise.reject(error)
-  }
+  },
 )
 
 export const httpNav = httpNavInstance

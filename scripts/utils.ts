@@ -21,6 +21,8 @@ import {
 } from '../src/utils/pureUtils'
 import fs from 'node:fs'
 import yaml from 'js-yaml'
+import sharp from 'sharp'
+import axios from 'axios'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
@@ -34,7 +36,9 @@ export const TAG_ID_NAME2 = '英文'
 export const TAG_ID_NAME3 = 'GitHub'
 
 export const PATHS = {
-  upload: path.resolve('_upload', 'images'),
+  root: path.resolve('dist', 'browser'),
+  public: path.resolve('public'),
+  uploadImage: path.resolve('_upload', 'images'),
   db: path.resolve('data', 'db.json'),
   serverdb: path.resolve('data', 'serverdb.json'),
   settings: path.resolve('data', 'settings.json'),
@@ -43,6 +47,8 @@ export const PATHS = {
   collect: path.resolve('data', 'collect.json'),
   component: path.resolve('data', 'component.json'),
   internal: path.resolve('data', 'internal.json'),
+  news: path.resolve('data', 'news.json'),
+  backup: path.resolve('data', 'backup.json'),
   config: path.resolve('nav.config.yaml'),
   configJson: path.resolve('nav.config.json'),
   pkg: path.resolve('package.json'),
@@ -51,6 +57,10 @@ export const PATHS = {
     main: path.resolve('src', 'main.html'),
     write: path.resolve('src', 'index.html'),
   },
+  manifest: path.resolve('dist', 'browser', 'manifest.webmanifest'),
+  manifestPublic: path.resolve('public', 'manifest.webmanifest'),
+  manifestIcon512: path.resolve('dist', 'browser', 'icons', 'icon-512x512.png'),
+  manifestIcon192: path.resolve('dist', 'browser', 'icons', 'icon-192x192.png'),
 } as const
 
 export const getConfig = () => {
@@ -62,12 +72,12 @@ export const getConfig = () => {
 
   const gitRepoUrl = removeTrailingSlashes(config['gitRepoUrl'] || '').replace(
     /\.git$/,
-    ''
+    '',
   )
 
   const zorroVersion = pkgJson.dependencies['ng-zorro-antd'].replace(
     /[^0-9.]/g,
-    ''
+    '',
   )
   return {
     version: pkgJson.version,
@@ -89,7 +99,7 @@ interface WebCountResult {
 }
 
 // 统计网站数量
-export function getWebCount(websiteList: INavProps[]): WebCountResult {
+export function getWebCount(navs: INavProps[]): WebCountResult {
   // 用户查看所有数量
   let userViewCount = 0
   // 登陆者统计所有数量
@@ -129,8 +139,8 @@ export function getWebCount(websiteList: INavProps[]): WebCountResult {
     }
   }
 
-  r(websiteList)
-  r2(websiteList)
+  r(navs)
+  r2(navs)
 
   return {
     userViewCount: userViewCount - diffCount,
@@ -190,7 +200,7 @@ function incrementClassId(id: number | string): number {
 export function setWebs(
   nav: INavProps[],
   settings: ISettings,
-  tags: ITagPropValues[] = []
+  tags: ITagPropValues[] = [],
 ): INavProps[] {
   if (!Array.isArray(nav)) return []
 
@@ -364,7 +374,7 @@ export function writeTemplate({
   seoTemplate,
 }: TemplateParams): string {
   const search: ISearchProps = JSON.parse(
-    fs.readFileSync(PATHS.search, 'utf-8')
+    fs.readFileSync(PATHS.search, 'utf-8'),
   )
 
   function getLoadKey(): string {
@@ -428,27 +438,33 @@ export function writeTemplate({
   <link rel ="apple-touch-icon" href="${settings.favicon}" />
   ${prefetchLinks}
 `.trim()
+
+  const pwaContent = `
+<script>window.__PWA_ENABLE__=${settings.pwaEnable};</script>
+`.trim()
+
   let t = html
   t = t.replace(
     /(<!-- nav\.config-start -->)(.|\s)*?(<!-- nav.config-end -->)/i,
-    `$1${htmlTemplate}$3`
+    `$1${htmlTemplate}$3`,
   )
-  if (settings.headerContent) {
-    t = t.replace(
-      /(<!-- nav.headerContent-start -->)(.|\s)*?(<!-- nav.headerContent-end -->)/i,
-      `$1${settings.headerContent}$3`
-    )
-  }
-
+  t = t.replace(
+    /(<!-- nav.headerContent-start -->)(.|\s)*?(<!-- nav.headerContent-end -->)/i,
+    `$1${settings.headerContent}$3`,
+  )
   t = t.replace(
     /(<!-- nav.seo-start -->)(.|\s)*?(<!-- nav.seo-end -->)/i,
-    `$1${seoTemplate}$3`
+    `$1${seoTemplate}$3`,
+  )
+  t = t.replace(
+    /(<!-- nav.pwa-start -->)(.|\s)*?(<!-- nav.pwa-end -->)/i,
+    `$1${pwaContent}$3`,
   )
 
   const loadingCode = settings.loadingCode.trim()
   t = t.replace(
     /(<!-- nav.loading-start -->)(.|\s)*?(<!-- nav.loading-end -->)/i,
-    `$1${loadingCode || LOAD_MAP[getLoadKey()] || ''}$3`
+    `$1${loadingCode || LOAD_MAP[getLoadKey()] || ''}$3`,
   )
   return t
 }
@@ -480,7 +496,7 @@ function updateItemField(
   value: string | undefined,
   settingKey: keyof ISettings,
   settings: ISettings,
-  logMessage: string
+  logMessage: string,
 ): string {
   if (settings[settingKey] === 'ALWAYS' && value) {
     const message = `更新${logMessage}：${correctURL(item.url)}: "${
@@ -506,7 +522,7 @@ export async function spiderWebs(
   settings: ISettings,
   props?: {
     onOk?: (messages: string[]) => void
-  }
+  },
 ): Promise<SpiderWebResult> {
   let errorUrlCount = 0
   const { onOk } = props || {}
@@ -544,7 +560,7 @@ export async function spiderWebs(
 
   if (items.length) {
     console.log(
-      `正在爬取信息... 并发数量：${max}  超时: ${settings.spiderTimeout}秒`
+      `正在爬取信息... 并发数量：${max}  超时: ${settings.spiderTimeout}秒`,
     )
   }
 
@@ -554,7 +570,7 @@ export async function spiderWebs(
       .map((item) =>
         getWebInfo(correctURL(item.url), {
           timeout: settings.spiderTimeout * 1000,
-        })
+        }),
       )
 
     const promises = await Promise.all(requestPromises)
@@ -584,7 +600,7 @@ export async function spiderWebs(
             res.iconUrl,
             'spiderIcon',
             settings,
-            '图标'
+            '图标',
           ),
           updateItemField(
             item,
@@ -592,7 +608,7 @@ export async function spiderWebs(
             res.title,
             'spiderTitle',
             settings,
-            '标题'
+            '标题',
           ),
           updateItemField(
             item,
@@ -600,8 +616,8 @@ export async function spiderWebs(
             res.description,
             'spiderDescription',
             settings,
-            '描述'
-          )
+            '描述',
+          ),
         )
       }
       console.log('-'.repeat(100))
@@ -629,7 +645,7 @@ export async function fileWriteStream(path: string, data: object | string) {
   const stream1 = fs.createWriteStream(path)
 
   const stream1Promise = new Promise((resolve, reject) => {
-    stream1.on('finish', () => resolve('file1 written'))
+    stream1.on('finish', () => resolve(`${path} written`))
     stream1.on('error', (err) => reject(err))
   })
 
@@ -702,4 +718,53 @@ export function fileReadStream(path: string): Promise<string> {
       console.error('Error:', err)
     })
   })
+}
+
+export async function writePWA(settings: ISettings, manifestPath: string) {
+  try {
+    if (settings.pwaEnable) {
+      const manifestFile = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
+      if (settings.pwaName) {
+        manifestFile.name = settings.pwaName
+        manifestFile.short_name = settings.pwaName
+        fs.writeFileSync(manifestPath, JSON.stringify(manifestFile, null, 2))
+      }
+      if (settings.pwaIcon) {
+        let imageBuffer = Buffer.from([])
+        try {
+          new URL(settings.pwaIcon)
+          const res = await axios.get(settings.pwaIcon, {
+            responseType: 'arraybuffer',
+          })
+          imageBuffer = res.data
+        } catch {
+          const imagePath = path.join(PATHS.uploadImage, '..', settings.pwaIcon)
+          console.log('PWA icon path', imagePath)
+          imageBuffer = fs.readFileSync(imagePath)
+        }
+
+        const sharpImage = sharp(imageBuffer)
+        await Promise.all([
+          sharpImage
+            .resize({
+              width: 512,
+              height: 512,
+              fit: 'cover',
+            })
+            .png()
+            .toFile(PATHS.manifestIcon512),
+          sharpImage
+            .resize({
+              width: 192,
+              height: 192,
+              fit: 'cover',
+            })
+            .png()
+            .toFile(PATHS.manifestIcon192),
+        ])
+      }
+    }
+  } catch (error: any) {
+    console.log('writePWA error', error.message)
+  }
 }

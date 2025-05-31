@@ -12,16 +12,7 @@ import http, {
 } from '../utils/http'
 import qs from 'qs'
 import { encode } from 'js-base64'
-import {
-  settings,
-  websiteList,
-  tagList,
-  getTagMap,
-  search,
-  internal,
-  component,
-} from 'src/store'
-import type { ISettings } from 'src/types'
+import { settings, navs, tagList, search, internal, component } from 'src/store'
 import { isSelfDevelop } from 'src/utils/utils'
 import { isLogin, getImageToken } from 'src/utils/user'
 import { DB_PATH } from 'src/constants'
@@ -102,27 +93,12 @@ export function getContentes() {
   return http
     .post('/api/contents/get', getDefaultRequestData())
     .then((res: any) => {
-      websiteList.splice(0, websiteList.length)
-      tagList.splice(0, tagList.length)
-
-      internal.loginViewCount = res.data.internal.loginViewCount
-      internal.userViewCount = res.data.internal.userViewCount
-      websiteList.push(...res.data.webs)
-      tagList.push(...res.data.tags)
-      const resSettings = res.data.settings as ISettings
-      for (const k in resSettings) {
-        // @ts-ignore
-        settings[k] = resSettings[k]
-      }
-      for (const k in res.data.component) {
-        // @ts-ignore
-        component[k] = res.data.component[k]
-      }
-      for (const k in res.data.search) {
-        // @ts-ignore
-        search[k] = res.data.search[k]
-      }
-      getTagMap()
+      internal.set(res.data.internal)
+      navs.set(res.data.webs)
+      tagList.set(res.data.tags)
+      settings.set(res.data.settings)
+      component.set(res.data.component)
+      search.set(res.data.search)
       event.emit('WEB_REFRESH')
       return res
     })
@@ -168,10 +144,8 @@ export async function createBranch(branch: string) {
   } else {
     params['sha'] = 'c1fdab3d29df4740bb97a4ae7f24ed0eaa682557'
     try {
-      const commitRes = await getCommits()
-      if (commitRes.data?.length > 0) {
-        params['sha'] = commitRes.data[0]['sha']
-      }
+      const commitRes = await createEmptyCommit()
+      params['sha'] = commitRes.data['sha']
     } catch (error) {}
 
     params['ref'] = `refs/heads/${branch}`
@@ -193,6 +167,7 @@ type Iupdate = {
   path: string
   branch?: string
   isEncode?: boolean
+  refresh?: boolean
 }
 export async function updateFileContent({
   message = 'update',
@@ -200,6 +175,7 @@ export async function updateFileContent({
   path,
   branch = DEFAULT_BRANCH,
   isEncode = true,
+  refresh = true,
 }: Iupdate) {
   if (isSelfDevelop) {
     if (!isLogin) {
@@ -211,7 +187,7 @@ export async function updateFileContent({
         content,
       })
       .then((res) => {
-        getContentes()
+        refresh && getContentes()
         requestActionUrl()
         return res
       })
@@ -236,7 +212,7 @@ export async function updateFileContent({
 
   const url = isGitLab
     ? `/projects/${getLabProjectId()}/repository/files/${encodeURIComponent(
-        path
+        path,
       )}`
     : `/repos/${authorName}/${repoName}/contents/${path}`
 
@@ -246,8 +222,11 @@ export async function updateFileContent({
   })
 }
 
-export function getCommits() {
-  return http.get(`/repos/${authorName}/${repoName}/commits`)
+export function createEmptyCommit() {
+  return http.post(`/repos/${authorName}/${repoName}/git/commits`, {
+    message: 'Initial commit',
+    tree: '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+  })
 }
 
 export async function createImageFile({
@@ -305,6 +284,21 @@ export async function createImageFile({
     requestActionUrl()
     return res
   })
+}
+
+export async function createFile({ content, path }: Iupdate) {
+  if (isSelfDevelop) {
+    return http
+      .post('/api/file/create', {
+        path,
+        content,
+      })
+      .then((res) => {
+        requestActionUrl()
+        return res
+      })
+  }
+  return null
 }
 
 export function getUserCollect(data?: Record<string, any>) {
@@ -401,6 +395,11 @@ export function updateConfigInfo(data: Record<string, any> = {}) {
 export function getNews(data: Record<string, any> = {}) {
   data['showError'] = false
   data['showLoading'] = false
+  if (isSelfDevelop) {
+    return http.post('/api/news', data, {
+      timeout: 0,
+    })
+  }
   return httpNav.post('/api/news', data, {
     timeout: 0,
   })
@@ -421,11 +420,11 @@ export function getCDN(path: string) {
   } else if (_isGItLab) {
     return `https://gitlab.com/${owner}/${repo}/-/raw/${branch}/${path}?ref_type=heads`
   }
-  return `https://${settings.gitHubCDN}/gh/${owner}/${repo}@${branch}/${path}`
+  return `https://${settings().gitHubCDN}/gh/${owner}/${repo}@${branch}/${path}`
 }
 
 function requestActionUrl() {
-  const url = settings.actionUrl
+  const url = settings().actionUrl
   if (url) {
     const img = document.createElement('img')
     img.src = url
